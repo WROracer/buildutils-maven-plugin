@@ -7,7 +7,7 @@
     <groupId>de.wroracer</groupId>
     <artifactId>buildutils-maven-plugin</artifactId>
     <packaging>maven-plugin</packaging>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.0.1-dev0</version>
 
     <name>buildutils-maven-plugin Maven Mojo</name>
 
