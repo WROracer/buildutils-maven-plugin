@@ -7,7 +7,6 @@ import org.apache.maven.plugin.MojoFailureException;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.project.MavenProject;
-import org.codehaus.mojo.versions.SetMojo;
 
 @Mojo(name = "version-update-dev")
 public class VersionUpdateDev extends AbstractMojo {
