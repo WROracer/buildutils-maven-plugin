@@ -1,0 +1,207 @@
+name: Master Build
+'on':
+  push:
+    branches:
+      - master
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    outputs:
+      version: '${{ steps.bump.outputs.version }}'
+    steps:
+      - name: Checkout Latest Commit
+        uses: actions/checkout@v2
+      - name: Bump Version
+        id: bump
+        uses: 'WROracer/version-bump-action@master'
+        with:
+          github-token: '${{ secrets.github_token }}'
+          git-username: Bot
+          auto-version-bump: true
+      - name: Print Version
+        run: 'echo ''New Version: ${{steps.bump.outputs.version}}'''
+  build:
+    needs: bump
+    outputs:
+      version: '${{  needs.bump.outputs.version }}'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Latest Commit
+        uses: actions/checkout@v3
+        with:
+          ref: master
+      - name: Set up JDK 19
+        uses: actions/setup-java@v1
+        with:
+          java-version: 19
+      - name: Build with Maven
+        run: 'mvn -s $GITHUB_WORKSPACE/.github/workflows/maven-settings.xml -B clean:clean package --file pom.xml'
+        env:
+          USER_NAME: ${{ secrets.USER_NAME }}
+          ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+      - run: mvn -s $GITHUB_WORKSPACE/.github/workflows/maven-settings.xml --batch-mode --update-snapshots verify
+        env:
+          USER_NAME: ${{ secrets.USER_NAME }}
+          ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+      - uses: actions/upload-artifact@v2
+        with:
+          name: jar
+          path: uno-*/target/*.jar
+  release:
+    if: 'startsWith(github.event.head_commit.message, ''#'')'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/download-artifact@v2
+        id: download
+        with:
+          name: jar
+      - name: Display structure of downloaded files
+        run: ls -R
+      # - uses: marvinpinto/action-automatic-releases@latest
+      #   with:
+      #     repo_token: '${{ secrets.GITHUB_TOKEN }}'
+      #     automatic_release_tag: '${{ needs.build.outputs.version }}'
+      #     prerelease: false
+      #     title: 'Version: ${{ needs.build.outputs.version }}'
+      #     files: |
+      #       **/*.jar
+      #       README.md
+      - name: Build Changelog
+        id: build_changelog
+        uses: mikepenz/release-changelog-builder-action@v3
+          #with:
+        #configuration: ".github/workflows/changelog.json"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Print Changelog
+        run: 'echo ''Changelog: ${{steps.build_changelog.outputs.changelog}}'''
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+        with:
+          tag_name: '${{ needs.build.outputs.version }}'
+          release_name: 'Version: ${{ needs.build.outputs.version }}'
+          body: '${{steps.build_changelog.outputs.changelog}}'
+          draft: false
+          prerelease: false
+      - name: Upload Release Asset JAR
+        id: upload-release-asset-jar
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
+          asset_path: ./uno-backend/target/uno-backend-${{ needs.build.outputs.version }}.jar
+          asset_name: uno-backend-${{ needs.build.outputs.version }}.jar
+          asset_content_type: application/java-archive
+      - name: Upload Release Asset JAR 2
+        id: upload-release-asset-jar-2
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
+          asset_path: ./uno-backend-data/target/uno-backend-data-${{ needs.build.outputs.version }}.jar
+          asset_name: uno-backend-data-${{ needs.build.outputs.version }}.jar
+          asset_content_type: application/java-archive
+      - name: Upload Release Asset MD
+        id: upload-release-asset-md
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
+          asset_path: ./README.md
+          asset_name: README.md
+          asset_content_type: text/markdown
+  upload:
+    runs-on: ubuntu-latest
+    needs: build
+    if: false
+    steps:
+      - uses: actions/download-artifact@v2
+        id: download
+        with:
+          name: jar
+      - name: Glob match
+        uses: tj-actions/glob@v16
+        id: glob
+        with:
+          files: |
+            uno-backend/target/*.jar
+      - name: Show all matching files
+        run: |
+          echo "${{ steps.glob.outputs.paths }}"
+      - name: Rename Jar
+        run: mv ${{ steps.glob.outputs.paths }} UNO-Server.jar
+      - name: Publish to pterodactyl
+        uses: Avenze/pterodactyl-actions@master
+        with:
+          panel: '${{ secrets.PANEL }}'
+          api_key: '${{ secrets.API_KEY }}'
+          server: '${{ secrets.SERVER }}'
+          path: 'UNO-Server.jar'
+          directory: /
+      - name: Pterodactyl Power Action
+        uses: outsparkled/pterodactyl-power-action@v0.1.0
+        with:
+          panel-url: '${{ secrets.PANEL }}'
+          server-id: '${{ secrets.SERVER }}'
+          bearer-token: '${{ secrets.API_KEY }}'
+          power-action: restart
+  prerelease:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Latest Commit
+        uses: actions/checkout@v3
+      - uses: actions/download-artifact@v2
+        id: download
+        with:
+          name: jar
+      - name: Display structure of downloaded files
+        run: ls -R
+      - uses: marvinpinto/action-automatic-releases@latest
+        with:
+          repo_token: '${{ secrets.GITHUB_TOKEN }}'
+          automatic_release_tag: latest
+          prerelease: true
+          title: Development Build
+          files: |
+            **/*.jar
+            README.md
+  mvnRelease:
+    needs: release
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout Latest Commit
+        uses: actions/checkout@v3
+        with:
+          ref: master
+      - name: Set up JDK 19
+        uses: actions/setup-java@v3
+        with:
+          java-version: '19'
+          distribution: 'temurin'
+          server-id: github # Value of the distributionManagement/repository/id field of the pom.xml
+          settings-path: ${{ github.workspace }} # location for the settings.xml file
+
+      - name: Build with Maven
+        run: 'mvn -s $GITHUB_WORKSPACE/.github/workflows/maven-settings.xml -B clean:clean package'
+        env:
+          USER_NAME: ${{ secrets.USER_NAME }}
+          ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+
+      - name: Publish to GitHub Packages Apache Maven
+        run: mvn deploy -s $GITHUB_WORKSPACE/settings.xml
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
